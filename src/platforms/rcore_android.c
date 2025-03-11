@@ -27,7 +27,7 @@
 *
 *   LICENSE: zlib/libpng
 *
-*   Copyright (c) 2013-2024 Ramon Santamaria (@raysan5) and contributors
+*   Copyright (c) 2013-2025 Ramon Santamaria (@raysan5) and contributors
 *
 *   This software is provided "as-is", without any express or implied warranty. In no event
 *   will the authors be held liable for any damages arising from the use of this software.
@@ -74,7 +74,7 @@ typedef struct {
 // Global Variables Definition
 //----------------------------------------------------------------------------------
 extern CoreData CORE;                   // Global CORE state context
-
+extern bool isGpuReady;                 // Flag to note GPU has been initialized successfully
 static PlatformData platform = { 0 };   // Platform specific data
 
 //----------------------------------------------------------------------------------
@@ -437,7 +437,7 @@ int GetMonitorCount(void)
     return 1;
 }
 
-// Get number of monitors
+// Get current monitor where window is placed
 int GetCurrentMonitor(void)
 {
     TRACELOG(LOG_WARNING, "GetCurrentMonitor() not implemented on target platform");
@@ -466,17 +466,21 @@ int GetMonitorHeight(int monitor)
 }
 
 // Get selected monitor physical width in millimetres
+// NOTE: It seems to return a slightly underestimated value on some devices
 int GetMonitorPhysicalWidth(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorPhysicalWidth() not implemented on target platform");
-    return 0;
+    int widthPixels = ANativeWindow_getWidth(platform.app->window);
+    float dpi = AConfiguration_getDensity(platform.app->config);
+    return (widthPixels/dpi)*25.4f;
 }
 
 // Get selected monitor physical height in millimetres
+// NOTE: It seems to return a slightly underestimated value on some devices
 int GetMonitorPhysicalHeight(int monitor)
 {
-    TRACELOG(LOG_WARNING, "GetMonitorPhysicalHeight() not implemented on target platform");
-    return 0;
+    int heightPixels = ANativeWindow_getHeight(platform.app->window);
+    float dpi = AConfiguration_getDensity(platform.app->config);
+    return (heightPixels/dpi)*25.4f;
 }
 
 // Get selected monitor refresh rate
@@ -503,8 +507,9 @@ Vector2 GetWindowPosition(void)
 // Get window scale DPI factor for current monitor
 Vector2 GetWindowScaleDPI(void)
 {
-    TRACELOG(LOG_WARNING, "GetWindowScaleDPI() not implemented on target platform");
-    return (Vector2){ 1.0f, 1.0f };
+    int density = AConfiguration_getDensity(platform.app->config);
+    float scale = (float)density/160;
+    return (Vector2){ scale, scale };
 }
 
 // Set clipboard text content
@@ -519,6 +524,16 @@ const char *GetClipboardText(void)
 {
     TRACELOG(LOG_WARNING, "GetClipboardText() not implemented on target platform");
     return NULL;
+}
+
+// Get clipboard image
+Image GetClipboardImage(void)
+{
+    Image image = { 0 };
+
+    TRACELOG(LOG_WARNING, "GetClipboardImage() not implemented on target platform");
+
+    return image;
 }
 
 // Show mouse cursor
@@ -621,9 +636,9 @@ int SetGamepadMappings(const char *mappings)
 }
 
 // Set gamepad vibration
-void SetGamepadVibration(int gamepad, float leftMotor, float rightMotor)
+void SetGamepadVibration(int gamepad, float leftMotor, float rightMotor, float duration)
 {
-    TRACELOG(LOG_WARNING, "GamepadSetVibration() not implemented on target platform");
+    TRACELOG(LOG_WARNING, "SetGamepadVibration() not implemented on target platform");
 }
 
 // Set mouse position XY
@@ -695,7 +710,7 @@ void PollInputEvents(void)
 
     // Poll Events (registered events) until we reach TIMEOUT which indicates there are no events left to poll
     // NOTE: Activity is paused if not enabled (platform.appEnabled)
-    while ((pollResult = ALooper_pollOnce(platform.appEnabled? 0 : -1, NULL, &pollEvents, (void**)&platform.source)) > ALOOPER_POLL_TIMEOUT)
+    while ((pollResult = ALooper_pollOnce(platform.appEnabled? 0 : -1, NULL, &pollEvents, ((void **)&platform.source)) > ALOOPER_POLL_TIMEOUT))
     {
         // Process this event
         if (platform.source != NULL) platform.source->process(platform.app, platform.source);
@@ -709,7 +724,6 @@ void PollInputEvents(void)
         }
     }
 }
-
 
 //----------------------------------------------------------------------------------
 // Module Internal Functions Definition
@@ -783,7 +797,7 @@ int InitPlatform(void)
     while (!CORE.Window.ready)
     {
         // Process events until we reach TIMEOUT, which indicates no more events queued.
-        while ((pollResult = ALooper_pollOnce(0, NULL, &pollEvents, (void**)&platform.source)) > ALOOPER_POLL_TIMEOUT)
+        while ((pollResult = ALooper_pollOnce(0, NULL, &pollEvents, ((void **)&platform.source)) > ALOOPER_POLL_TIMEOUT))
         {
             // Process this event
             if (platform.source != NULL) platform.source->process(platform.app, platform.source);
@@ -845,22 +859,20 @@ static int InitGraphicsDevice(void)
         TRACELOG(LOG_INFO, "DISPLAY: Trying to enable MSAA x4");
     }
 
-    const EGLint framebufferAttribs[] =
-    {
-        EGL_RENDERABLE_TYPE, (rlGetVersion() == RL_OPENGL_ES_30)? EGL_OPENGL_ES3_BIT : EGL_OPENGL_ES2_BIT,      // Type of context support
+    const EGLint framebufferAttribs[] = {
+        EGL_RENDERABLE_TYPE, (rlGetVersion() == RL_OPENGL_ES_30)? EGL_OPENGL_ES3_BIT : EGL_OPENGL_ES2_BIT, // Type of context support
         EGL_RED_SIZE, 8,            // RED color bit depth (alternative: 5)
         EGL_GREEN_SIZE, 8,          // GREEN color bit depth (alternative: 6)
         EGL_BLUE_SIZE, 8,           // BLUE color bit depth (alternative: 5)
         //EGL_TRANSPARENT_TYPE, EGL_NONE, // Request transparent framebuffer (EGL_TRANSPARENT_RGB does not work on RPI)
         EGL_DEPTH_SIZE, 16,         // Depth buffer size (Required to use Depth testing!)
         //EGL_STENCIL_SIZE, 8,      // Stencil buffer size
-        EGL_SAMPLE_BUFFERS, sampleBuffer,    // Activate MSAA
+        EGL_SAMPLE_BUFFERS, sampleBuffer, // Activate MSAA
         EGL_SAMPLES, samples,       // 4x Antialiasing if activated (Free on MALI GPUs)
         EGL_NONE
     };
 
-    const EGLint contextAttribs[] =
-    {
+    const EGLint contextAttribs[] = {
         EGL_CONTEXT_CLIENT_VERSION, 2,
         EGL_NONE
     };
@@ -995,6 +1007,7 @@ static void AndroidCommandCallback(struct android_app *app, int32_t cmd)
                     // Initialize OpenGL context (states and resources)
                     // NOTE: CORE.Window.currentFbo.width and CORE.Window.currentFbo.height not used, just stored as globals in rlgl
                     rlglInit(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height);
+                    isGpuReady = true;
 
                     // Setup default viewport
                     // NOTE: It updated CORE.Window.render.width and CORE.Window.render.height
@@ -1222,7 +1235,7 @@ static int32_t AndroidInputCallback(struct android_app *app, AInputEvent *event)
             return 1; // Handled gamepad button
         }
 
-        KeyboardKey key = (keycode > 0 && keycode < KEYCODE_MAP_SIZE)? mapKeycode[keycode] : KEY_NULL;
+        KeyboardKey key = ((keycode > 0) && (keycode < KEYCODE_MAP_SIZE))? mapKeycode[keycode] : KEY_NULL;
         if (key != KEY_NULL)
         {
             // Save current key and its state

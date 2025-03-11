@@ -11,7 +11,7 @@ uniform vec4 colDiffuse;
 // Output fragment color
 out vec4 finalColor;
 
-// NOTE: Add here your custom variables
+// NOTE: Add your custom variables here
 
 void main()
 {
@@ -23,5 +23,5 @@ void main()
     float depth = (2.0*zNear)/(zFar + zNear - z*(zFar - zNear));
 
     // Calculate final fragment color
-    finalColor = vec4(depth, depth, depth, 1.0f);
+    finalColor = vec4(depth, depth, depth, 1.0);
 }

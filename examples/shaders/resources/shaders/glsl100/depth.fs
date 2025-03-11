@@ -10,7 +10,7 @@ varying vec4 fragColor;
 uniform sampler2D texture0;     // Depth texture
 uniform vec4 colDiffuse;
 
-// NOTE: Add here your custom variables
+// NOTE: Add your custom variables here
 
 void main()
 {
@@ -22,5 +22,5 @@ void main()
     float depth = (2.0*zNear)/(zFar + zNear - z*(zFar - zNear));
 
     // Calculate final fragment color
-    gl_FragColor = vec4(depth, depth, depth, 1.0f);
+    gl_FragColor = vec4(depth, depth, depth, 1.0);
 }
